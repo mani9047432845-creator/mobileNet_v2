@@ -1,31 +1,34 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-import os, requests
+import os
+import requests
 import numpy as np
 from PIL import Image
 import tensorflow as tf
 
 # =====================
-# CONFIG & PATHS
+# APP CONFIG
 # =====================
 app = Flask(__name__)
 CORS(app)
 
-MODEL_DIR = "models_cache"
-UPLOAD_FOLDER = "uploads"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_DIR = os.path.join(BASE_DIR, "models_cache")
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+
 os.makedirs(MODEL_DIR, exist_ok=True)
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 CLASS_LABELS = ["benign", "malignant", "normal"]
 ALLOWED_EXT = {"jpg", "jpeg", "png"}
 
 # =====================
-# MODEL CONFIG (MobileNetV2 H5)
+# MODEL CONFIG (H5)
 # =====================
-MODEL_URL = "https://huggingface.co/mani880740255/skin_care_tflite/resolve/main/skin_cancer_mobilenetv2%20(1).h5"
+MODEL_URL = "https://huggingface.co/mani880740255/skin_care_tflite/resolve/main/skin_cancer_mobilenetv2.h5"
 MODEL_PATH = os.path.join(MODEL_DIR, "skin_cancer_mobilenetv2.h5")
 
-model = None  # Global model cache
+model = None
 
 # =====================
 # CHAT DATA
@@ -41,39 +44,42 @@ CHAT_RESPONSES = {
 # =====================
 # HELPERS
 # =====================
-def allowed_file(name):
-    return "." in name and name.rsplit(".", 1)[1].lower() in ALLOWED_EXT
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
-def ensure_model_exists():
+
+def load_model():
     global model
-    if model is None:
-        if not os.path.exists(MODEL_PATH):
-            print("Downloading MobileNetV2 model...")
-            r = requests.get(MODEL_URL, stream=True)
-            if r.status_code == 200:
-                with open(MODEL_PATH, "wb") as f:
-                    for chunk in r.iter_content(8192):
-                        f.write(chunk)
-            else:
-                raise Exception("Model download failed")
+    if model is not None:
+        return
 
-        print("Loading MobileNetV2 model...")
-        model = tf.keras.models.load_model(MODEL_PATH)
+    if not os.path.exists(MODEL_PATH):
+        print("Downloading H5 model...")
+        r = requests.get(MODEL_URL, stream=True)
+        if r.status_code != 200:
+            raise RuntimeError("Model download failed")
 
-# =====================
-# MOBILENETV2 PREDICT
-# =====================
-def predict_mobilenet(img_path):
-    ensure_model_exists()
+        with open(MODEL_PATH, "wb") as f:
+            for chunk in r.iter_content(8192):
+                f.write(chunk)
 
-    img = Image.open(img_path).convert("RGB")
-    img = img.resize((224, 224))  # MobileNetV2 input size
-    img = np.array(img) / 255.0   # Normalize
+    print("Loading TensorFlow model...")
+    model = tf.keras.models.load_model(MODEL_PATH)
+
+
+def preprocess_image(path):
+    img = Image.open(path).convert("RGB")
+    img = img.resize((224, 224))
+    img = np.array(img, dtype=np.float32) / 255.0
     img = np.expand_dims(img, axis=0)
+    return img
 
+
+def predict_image(path):
+    load_model()
+    img = preprocess_image(path)
     preds = model.predict(img)[0]
     idx = int(np.argmax(preds))
-
     return idx, preds.tolist()
 
 # =====================
@@ -82,6 +88,7 @@ def predict_mobilenet(img_path):
 @app.route("/")
 def home():
     return render_template("index.html")
+
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -92,13 +99,13 @@ def predict():
     if not allowed_file(file.filename):
         return jsonify({"error": "Invalid file type"}), 400
 
-    path = os.path.join(UPLOAD_FOLDER, file.filename)
+    path = os.path.join(UPLOAD_DIR, file.filename)
     file.save(path)
 
     try:
-        idx, probs = predict_mobilenet(path)
+        idx, probs = predict_image(path)
         return jsonify({
-            "model_used": "mobilenetv2",
+            "model": "MobileNetV2 (H5)",
             "prediction": CLASS_LABELS[idx],
             "confidence": float(probs[idx]),
             "probabilities": {
@@ -111,32 +118,25 @@ def predict():
         if os.path.exists(path):
             os.remove(path)
 
-# =====================
-# CHATBOT ROUTE
-# =====================
-@app.route('/chat', methods=['POST'])
+
+@app.route("/chat", methods=["POST"])
 def chat():
-    data = request.json
-    user_msg = data.get("message", "").lower().strip()
+    data = request.get_json(silent=True) or {}
+    msg = data.get("message", "").lower().strip()
 
-    if user_msg == "":
-        return jsonify({
-            "suggestions": list(CHAT_RESPONSES.keys())[:3]
-        })
+    if not msg:
+        return jsonify({"suggestions": list(CHAT_RESPONSES.keys())[:3]})
 
-    if user_msg in CHAT_RESPONSES:
-        return jsonify({
-            "reply": CHAT_RESPONSES[user_msg],
-            "suggestions": []
-        })
+    if msg in CHAT_RESPONSES:
+        return jsonify({"reply": CHAT_RESPONSES[msg], "suggestions": []})
 
     return jsonify({
-        "reply": "I'm sorry, I only answer specific skin health questions. Try using the suggested buttons.",
+        "reply": "I only answer basic skin health questions.",
         "suggestions": list(CHAT_RESPONSES.keys())
     })
 
 # =====================
-# MAIN
+# ENTRY
 # =====================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000)
