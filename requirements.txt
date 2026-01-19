@@ -2,10 +2,21 @@ Flask==3.0.0
 flask-cors==4.0.0
 gunicorn==21.2.0
 
+# ---------- PyTorch Stack ----------
 torch==2.1.2
 torchvision==0.16.2
 timm==0.9.12
 
+# ---------- TensorFlow Stack (CPU Safe) ----------
+tensorflow-cpu==2.15.0
+tensorflow-io-gcs-filesystem==0.34.0
+keras==2.15.0
+protobuf==4.25.1
+h5py==3.10.0
+
+# ---------- Core ML / Image ----------
 numpy==1.26.4
 Pillow==10.2.0
+
+# ---------- Utilities ----------
 requests==2.31.0
