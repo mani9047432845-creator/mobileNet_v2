@@ -1,3 +1,17 @@
+# ML models (large / generated)
 *.tflite
+*.h5
+
+# Uploaded user files
 uploads/
+
+# Python cache
 __pycache__/
+*.pyc
+
+# Virtual environment (local)
+venv/
+.env
+
+# OS junk
+.DS_Store
